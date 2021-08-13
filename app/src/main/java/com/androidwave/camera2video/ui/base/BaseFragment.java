@@ -13,4 +13,5 @@ public abstract class BaseFragment extends Fragment {
     }
 
     protected abstract void setUp(View view);
+    public abstract void processAE();
 }

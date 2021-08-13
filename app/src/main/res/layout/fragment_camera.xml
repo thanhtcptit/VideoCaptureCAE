@@ -16,6 +16,15 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 
+    <TextView
+        android:id="@+id/mMeanTV"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Mean: 2.5"
+        android:textColor="#449DEF"
+        android:textSize="20dp">
+    </TextView>
+
     <ImageView
         android:id="@+id/mRecordVideo"
         android:layout_width="wrap_content"

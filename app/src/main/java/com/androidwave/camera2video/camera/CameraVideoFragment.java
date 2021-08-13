@@ -6,6 +6,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
+import android.graphics.ImageFormat;
 import android.graphics.Matrix;
 import android.graphics.RectF;
 import android.graphics.SurfaceTexture;
@@ -18,6 +19,7 @@ import android.hardware.camera2.CameraMetadata;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.params.StreamConfigurationMap;
 import android.media.CamcorderProfile;
+import android.media.ImageReader;
 import android.media.MediaRecorder;
 import android.net.Uri;
 import android.os.Bundle;
@@ -34,11 +36,14 @@ import android.util.SparseIntArray;
 import android.view.Surface;
 import android.view.TextureView;
 import android.view.View;
+import android.widget.TextView;
 import android.widget.Toast;
-import android.widget.ToggleButton;
 
+import com.androidwave.camera2video.AutoExposureSDK;
 import com.androidwave.camera2video.R;
 import com.androidwave.camera2video.ui.base.BaseFragment;
+import com.androidwave.camera2video.utils.Constants;
+import com.androidwave.camera2video.utils.ImageListener;
 import com.karumi.dexter.Dexter;
 import com.karumi.dexter.MultiplePermissionsReport;
 import com.karumi.dexter.PermissionToken;
@@ -49,6 +54,7 @@ import java.io.File;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
@@ -57,13 +63,18 @@ import java.util.Locale;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
+import butterknife.BindView;
+
 public abstract class CameraVideoFragment extends BaseFragment {
 
     private static final String TAG = "CameraVideoFragment";
 
-    public static final int[] allExpFrac = {2, 6, 12, 25, 50, 100, 125, 200, 500, 800, 1000, 1600, 2000, 3200};
-    public static final int[] allISO = {50, 100, 200, 400, 800, 1600};
-    private boolean useCAE = false;
+    private AutoExposureSDK autoExposureSDK = new AutoExposureSDK();
+
+    private Activity mActivity;
+
+    @BindView(R.id.mMeanTV)
+    TextView mMeanTV;
 
     private static final int SENSOR_ORIENTATION_INVERSE_DEGREES = 270;
     private static final int SENSOR_ORIENTATION_DEFAULT_DEGREES = 90;
@@ -164,6 +175,9 @@ public abstract class CameraVideoFragment extends BaseFragment {
     private CaptureRequest.Builder mPreviewBuilder;
     private CaptureRequest mCaptureRequest;
 
+    private ImageReader mImageReader;
+    private ImageListener mImageListener;
+
     private static Size chooseVideoSize(Size[] choices) {
         for (Size size : choices) {
             if (1920 == size.getWidth() && 1080 == size.getHeight()) {
@@ -203,6 +217,9 @@ public abstract class CameraVideoFragment extends BaseFragment {
     @Override
     public void onViewCreated(final View view, Bundle savedInstanceState) {
         mTextureView = view.findViewById(getTextureResource());
+
+        mActivity = getActivity();
+        autoExposureSDK.init(getActivity().getAssets(), true);
     }
 
     @Override
@@ -309,9 +326,10 @@ public abstract class CameraVideoFragment extends BaseFragment {
             if (map == null) {
                 throw new RuntimeException("Cannot get available preview/video sizes");
             }
-            mVideoSize = chooseVideoSize(map.getOutputSizes(MediaRecorder.class));
-            mPreviewSize = chooseOptimalSize(map.getOutputSizes(SurfaceTexture.class),
-                    width, height, mVideoSize);
+//            mVideoSize = chooseVideoSize(map.getOutputSizes(MediaRecorder.class));
+//            mPreviewSize = chooseOptimalSize(map.getOutputSizes(SurfaceTexture.class),
+//                    width, height, mVideoSize);
+            mPreviewSize = new Size(Constants.videoFrameWidth, Constants.videoFrameHeight);
 
             int orientation = getResources().getConfiguration().orientation;
             if (orientation == Configuration.ORIENTATION_LANDSCAPE) {
@@ -325,6 +343,11 @@ public abstract class CameraVideoFragment extends BaseFragment {
                 requestPermission();
                 return;
             }
+
+            mImageListener = new ImageListener(this, mBackgroundHandler);
+            mImageReader = ImageReader.newInstance(Constants.videoFrameWidth, Constants.videoFrameHeight, ImageFormat.YUV_420_888, 10);
+            mImageReader.setOnImageAvailableListener(mImageListener, mBackgroundHandler);
+
             manager.openCamera(cameraId, mStateCallback, null);
         } catch (CameraAccessException e) {
             Log.e(TAG, "openCamera: Cannot access the camera.");
@@ -356,6 +379,7 @@ public abstract class CameraVideoFragment extends BaseFragment {
     private void closeCamera() {
         try {
             mCameraOpenCloseLock.acquire();
+            Constants.useCAE = false;
             closePreviewSession();
             if (null != mCameraDevice) {
                 mCameraDevice.close();
@@ -365,6 +389,10 @@ public abstract class CameraVideoFragment extends BaseFragment {
                 mMediaRecorder.release();
                 mMediaRecorder = null;
             }
+            if (null != mImageReader) {
+                mImageReader.close();
+                mImageReader = null;
+            }
         } catch (InterruptedException e) {
             throw new RuntimeException("Interrupted while trying to lock camera closing.");
         } finally {
@@ -373,11 +401,28 @@ public abstract class CameraVideoFragment extends BaseFragment {
     }
 
     public void changeMode() {
-        useCAE = !useCAE;
+        Constants.useCAE = !Constants.useCAE;
         String message = "Use custom AE";
-        if (!useCAE) message = "Use default AE";
-        Toast.makeText(getActivity(), message, Toast.LENGTH_SHORT).show();
+        if (!Constants.useCAE) message = "Use default AE";
+        Toast.makeText(mActivity, message, Toast.LENGTH_SHORT).show();
         updatePreview();
+    }
+
+    @Override
+    public void processAE() {
+        autoExposureSDK.process(Constants.image.getData(), Constants.image.getWidth(), Constants.image.getHeight(), Constants.useCAE);
+        mActivity.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                mMeanTV.setText("Mean: " + autoExposureSDK.getMeanValue());
+            }
+        });
+        if (Constants.useCAE) {
+            Constants.exposureValue = autoExposureSDK.getExposureValue();
+//            Constants.exposureIndex = autoExposureSDK.getExposureValue();
+            Constants.isoIndex = autoExposureSDK.getISOValue();
+            updatePreview();
+        }
     }
 
     private void startPreview() {
@@ -385,6 +430,8 @@ public abstract class CameraVideoFragment extends BaseFragment {
             return;
         }
         try {
+            boolean isUsingCAE = Constants.useCAE;
+            Constants.useCAE = false;
             closePreviewSession();
             SurfaceTexture texture = mTextureView.getSurfaceTexture();
             assert texture != null;
@@ -392,12 +439,14 @@ public abstract class CameraVideoFragment extends BaseFragment {
             mPreviewBuilder = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
             Surface previewSurface = new Surface(texture);
             mPreviewBuilder.addTarget(previewSurface);
-            mCameraDevice.createCaptureSession(Collections.singletonList(previewSurface),
+            mPreviewBuilder.addTarget(mImageReader.getSurface());
+            mCameraDevice.createCaptureSession(Arrays.asList(previewSurface, mImageReader.getSurface()),
                     new CameraCaptureSession.StateCallback() {
 
                         @Override
                         public void onConfigured(@NonNull CameraCaptureSession session) {
                             mPreviewSession = session;
+                            Constants.useCAE = isUsingCAE;
                             updatePreview();
                         }
 
@@ -427,14 +476,15 @@ public abstract class CameraVideoFragment extends BaseFragment {
     }
 
     private void setUpCaptureRequestBuilder(CaptureRequest.Builder builder) {
-        if (useCAE) {
+        if (Constants.useCAE) {
             builder.set(CaptureRequest.CONTROL_AF_MODE,
                     CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
             builder.set(CaptureRequest.CONTROL_AWB_MODE, CameraMetadata.CONTROL_AWB_MODE_AUTO);
             builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF);
 
-            Long exposureTime = 1000000000L / allExpFrac[3];
-            Integer isoValue = allISO[5];
+//            Long exposureTime = 1000000000L / Constants.allExpFrac[Constants.exposureValue];
+            Long exposureTime = 1000000000L / Constants.exposureValue;
+            Integer isoValue = Constants.allISO[Constants.isoIndex];
             builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, exposureTime);
             builder.set(CaptureRequest.SENSOR_SENSITIVITY, isoValue);
         } else {
@@ -496,6 +546,7 @@ public abstract class CameraVideoFragment extends BaseFragment {
                 break;
         }
         mMediaRecorder.prepare();
+        Log.d(TAG, "Framerate " + profile.videoFrameRate);
     }
 
     public void startRecordingVideo() {
@@ -503,13 +554,15 @@ public abstract class CameraVideoFragment extends BaseFragment {
             return;
         }
         try {
+            boolean isUsingCAE = Constants.useCAE;
+            Constants.useCAE = false;
             closePreviewSession();
             setUpMediaRecorder();
             SurfaceTexture texture = mTextureView.getSurfaceTexture();
             assert texture != null;
             texture.setDefaultBufferSize(mPreviewSize.getWidth(), mPreviewSize.getHeight());
 
-            mPreviewBuilder = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
+            mPreviewBuilder = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_ZERO_SHUTTER_LAG);
 
             List<Surface> surfaces = new ArrayList<>();
             Surface previewSurface = new Surface(texture);
@@ -520,11 +573,16 @@ public abstract class CameraVideoFragment extends BaseFragment {
             surfaces.add(recorderSurface);
             mPreviewBuilder.addTarget(recorderSurface);
 
+            Surface imageReaderSurface = mImageReader.getSurface();
+            surfaces.add(imageReaderSurface);
+            mPreviewBuilder.addTarget(imageReaderSurface);
+
             mCameraDevice.createCaptureSession(surfaces, new CameraCaptureSession.StateCallback() {
 
                 @Override
                 public void onConfigured(@NonNull CameraCaptureSession cameraCaptureSession) {
                     mPreviewSession = cameraCaptureSession;
+                    Constants.useCAE = isUsingCAE;
                     updatePreview();
                     getActivity().runOnUiThread(() -> {
                         mIsRecordingVideo = true;
