@@ -49,7 +49,7 @@ Java_com_androidwave_camera2video_AutoExposureSDK_getExposureValue(JNIEnv * env,
 
 extern "C" JNIEXPORT jint JNICALL
 Java_com_androidwave_camera2video_AutoExposureSDK_getISOValue(JNIEnv * env, jobject thiz) {
-    return AutoExposureSDK::instance->currentISOIndex;
+    return AutoExposureSDK::instance->currentISO;
 }
 
 extern "C" JNIEXPORT jfloat JNICALL

@@ -17,6 +17,7 @@ public class Constants {
     public static ImageData image = new ImageData(null,0,0,0,0);
 
     public static int exposureValue = 30;
+    public static int isoValue = 500;
     public static int exposureIndex = 2;
     public static int isoIndex = 4;
     public static final int[] allExpFrac = {6, 12, 30, 50, 80, 125, 200, 300, 400, 500, 600, 700, 800, 1000};

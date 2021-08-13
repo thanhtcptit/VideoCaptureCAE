@@ -5,7 +5,7 @@ double get_us(struct timeval t) { return (t.tv_sec * 1000000 + t.tv_usec); }
 AutoExposureSDK* AutoExposureSDK::instance = nullptr;
 
 AutoExposureSDK::AutoExposureSDK()
-: exposureRange {6, 12, 30, 50, 80, 125, 200, 300, 400, 500, 600, 700, 800, 1000},
+: exposureRange {10, 20, 30, 50, 80, 120, 200, 300, 400, 500, 600, 700, 800, 1000},
   isoRange {100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600} {
     LOGD("init");
 }
@@ -33,20 +33,41 @@ int AutoExposureSDK::process(JNIEnv *env, jbyteArray input, jint width, jint hei
 
     if (isActive) {
         float err = optimalMSV - currentMean;
-        int multiply = 5 * (int) std::abs(err / acceptanceBound);
-        if (err > acceptanceBound || err < -acceptanceBound) {
-            currentExposureIndex -= (err > 0) ? 1 : ((err < 0) ? -1 : 0);
-            currentExposureIndex = std::min(std::max(currentExposureIndex, 0), 13);
+        if (err > acceptanceInterval || err < -acceptanceInterval) {
+            if ((err > 0 && decreaseExp) || (err < 0 && increaseExp)) {
+                changeISO = true;
+                increaseExp = false;
+                decreaseExp = false;
+            }
+            if ((currentExposure == minExposure && err > 0) || (currentExposure == maxExposure && err < 0) || changeISO) {
+                int multiply = std::min((int) std::abs(err / acceptanceInterval), 3);
+                currentISO += multiply * isoStep * ((err > 0) ? 1 : ((err < 0) ? -1 : 0));
+                currentISO = std::min(std::max(currentISO, minISO), maxISO);
+                changeISO = false;
+            } else {
+//                currentExposureIndex -= (err > 0) ? 1 : ((err < 0) ? -1 : 0);
+//                currentExposureIndex = std::min(std::max(currentExposureIndex, 1), 13);
+                if (currentExposure < 50) exposureStep = 5;
+                else if (currentExposure < 200) exposureStep = 10;
+                else if (currentExposure < 400) exposureStep = 20;
+                else exposureStep = 50;
 
-            currentExposure -= multiply * ((err > 0) ? 1 : ((err < 0) ? -1 : 0));
-            currentExposure = std::min(std::max(currentExposure, 6), 1000);
-        } else {
-            changeGain = false;
+                currentExposure -= exposureStep * ((err > 0) ? 1 : ((err < 0) ? -1 : 0));
+                currentExposure = std::min(std::max(currentExposure, minExposure), maxExposure);
+                if (err > 0) {
+                    increaseExp = true;
+                    decreaseExp = false;
+                } else {
+                    increaseExp = false;
+                    decreaseExp = true;
+                }
+
+            }
         }
 
         gettimeofday(&stop_time, nullptr);
         elapsedMs = (int) (get_us(stop_time) - get_us(start_time)) / 1000;
-        LOGD("Mean: %f - Exp: %d - Process time: %d ms", currentMean, currentExposure, elapsedMs);
+        LOGD("Mean: %f - Exp: %d - ISO: %d - Process time: %d ms", currentMean, currentExposure, currentISO, elapsedMs);
     }
     return 1;
 }

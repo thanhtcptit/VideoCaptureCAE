@@ -26,7 +26,7 @@ class AutoExposureSDK {
 public:
     static AutoExposureSDK* instance;
     float currentMean = 0;
-    int currentExposure = 30, currentExposureIndex = 2, currentISOIndex = 4;
+    int currentExposure = 30, currentISO = 500, currentExposureIndex = 2, currentISOIndex = 4;
 
     struct timeval start_time, stop_time;
     int elapsedMs;
@@ -36,9 +36,11 @@ public:
 
     int process(JNIEnv *env, jbyteArray input, jint width, jint height, jboolean isActive);
 private:
-    float optimalMSV = 2.5f, acceptanceBound = 0.25f;
+    int minExposure = 10, maxExposure = 1000, minISO = 100, maxISO = 1600;
+    int exposureStep = 5, isoStep = 50;
+    float optimalMSV = 2.5f, acceptanceInterval = 0.25f;
     float exposureRange[14], isoRange[16];
-    bool changeGain = false;
+    bool increaseExp = false, decreaseExp = false, changeISO = false;
 };
 
 #endif //AUTOEXPOSURE_H

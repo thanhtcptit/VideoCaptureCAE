@@ -75,6 +75,8 @@ public abstract class CameraVideoFragment extends BaseFragment {
 
     @BindView(R.id.mMeanTV)
     TextView mMeanTV;
+    @BindView(R.id.mAEIndicatorTV)
+    TextView mAEIndicatorTV;
 
     private static final int SENSOR_ORIENTATION_INVERSE_DEGREES = 270;
     private static final int SENSOR_ORIENTATION_DEFAULT_DEGREES = 90;
@@ -380,6 +382,7 @@ public abstract class CameraVideoFragment extends BaseFragment {
         try {
             mCameraOpenCloseLock.acquire();
             Constants.useCAE = false;
+            mAEIndicatorTV.setText("AE: Default");
             closePreviewSession();
             if (null != mCameraDevice) {
                 mCameraDevice.close();
@@ -403,7 +406,11 @@ public abstract class CameraVideoFragment extends BaseFragment {
     public void changeMode() {
         Constants.useCAE = !Constants.useCAE;
         String message = "Use custom AE";
-        if (!Constants.useCAE) message = "Use default AE";
+        mAEIndicatorTV.setText("AE: Custom");
+        if (!Constants.useCAE) {
+            mAEIndicatorTV.setText("AE: Default");
+            message = "Use default AE";
+        }
         Toast.makeText(mActivity, message, Toast.LENGTH_SHORT).show();
         updatePreview();
     }
@@ -411,18 +418,24 @@ public abstract class CameraVideoFragment extends BaseFragment {
     @Override
     public void processAE() {
         autoExposureSDK.process(Constants.image.getData(), Constants.image.getWidth(), Constants.image.getHeight(), Constants.useCAE);
-        mActivity.runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                mMeanTV.setText("Mean: " + autoExposureSDK.getMeanValue());
-            }
-        });
+
+        String text = "Mean: " + String.format("%.3f", autoExposureSDK.getMeanValue());
         if (Constants.useCAE) {
             Constants.exposureValue = autoExposureSDK.getExposureValue();
 //            Constants.exposureIndex = autoExposureSDK.getExposureValue();
-            Constants.isoIndex = autoExposureSDK.getISOValue();
+//            Constants.isoIndex = autoExposureSDK.getISOValue();
+            Constants.isoValue = autoExposureSDK.getISOValue();
             updatePreview();
+            text += " - Exposure: 1/" + Constants.exposureValue + " - ISO: " + Constants.isoValue;
         }
+
+        final String info = text;
+        mActivity.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                mMeanTV.setText(info);
+            }
+        });
     }
 
     private void startPreview() {
@@ -484,7 +497,8 @@ public abstract class CameraVideoFragment extends BaseFragment {
 
 //            Long exposureTime = 1000000000L / Constants.allExpFrac[Constants.exposureValue];
             Long exposureTime = 1000000000L / Constants.exposureValue;
-            Integer isoValue = Constants.allISO[Constants.isoIndex];
+//            Integer isoValue = Constants.allISO[Constants.isoIndex];
+            Integer isoValue = Constants.isoValue;
             builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, exposureTime);
             builder.set(CaptureRequest.SENSOR_SENSITIVITY, isoValue);
         } else {
